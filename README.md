@@ -167,3 +167,4 @@ GET /api/search?q=关键词
 有经济能力打赏一杯奶茶钱，谢谢老板
 
 ![](README.assets/%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20250817161045_15.jpg)
+![]( https://visitor-badge.glitch.me/badge?page_id=<github.com/XiaoyaoGG1024/funds_webBaseline>)
