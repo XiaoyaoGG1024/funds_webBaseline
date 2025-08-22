@@ -28,37 +28,129 @@
           </div>
         </div>
         
-        <div class="detail-section" v-if="nodeData.summary">
+        <div class="detail-section" v-if="fullSummaryData">
           <h4>交易汇总</h4>
           <div class="detail-row">
-            <span class="label">总进金额：</span>
-            <span class="value amount-in">¥{{ formatAmount(nodeData.summary.totalInAmount) }}</span>
+            <span class="label">交易次数：</span>
+            <span class="value">{{ fullSummaryData.transactionCount || 0 }}</span>
           </div>
           <div class="detail-row">
-            <span class="label">总出金额：</span>
-            <span class="value amount-out">¥{{ formatAmount(nodeData.summary.totalOutAmount) }}</span>
+            <span class="label">出款次数：</span>
+            <span class="value amount-out">{{ fullSummaryData.outboundCount || 0 }}</span>
           </div>
           <div class="detail-row">
-            <span class="label">交易总笔数：</span>
-            <span class="value">{{ nodeData.summary.totalCount }}</span>
+            <span class="label">进款次数：</span>
+            <span class="value amount-in">{{ fullSummaryData.inboundCount || 0 }}</span>
           </div>
           <div class="detail-row">
-            <span class="label">最大单笔金额：</span>
-            <span class="value">¥{{ formatAmount(nodeData.summary.maxAmount) }}</span>
+            <span class="label">单次出款平均值：</span>
+            <span class="value amount-out">¥{{ formatAmount(fullSummaryData.avgOutboundAmount) }}</span>
           </div>
-          <div class="detail-row" v-if="nodeData.summary.tags">
-            <span class="label">风险标签：</span>
+          <div class="detail-row">
+            <span class="label">单次进款平均值：</span>
+            <span class="value amount-in">¥{{ formatAmount(fullSummaryData.avgInboundAmount) }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">交易余额：</span>
+            <span class="value">¥{{ formatAmount(fullSummaryData.transactionBalance) }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">进出比：</span>
+            <span class="value">{{ (fullSummaryData.inOutRatio || 0) }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">卡性质：</span>
             <span class="value">
               <span 
-                v-for="tag in nodeData.summary.tags" 
-                :key="tag" 
                 class="risk-tag"
-                :class="getTagClass(tag)"
+                :class="getCardNatureClass(fullSummaryData.cardNature)"
               >
-                {{ tag }}
+                {{ fullSummaryData.cardNature || '未知' }}
               </span>
             </span>
           </div>
+          <div class="detail-row" v-if="fullSummaryData.suspiciousGroupCard">
+            <span class="label">疑似团伙卡：</span>
+            <span class="value">
+              <span class="risk-tag tag-high-risk">是</span>
+            </span>
+          </div>
+        </div>
+
+        <div class="detail-section" v-if="fullSummaryData">
+          <h4>详细统计</h4>
+          <div class="detail-row">
+            <span class="label">三方支付次数：</span>
+            <span class="value">{{ fullSummaryData.thirdPartyPaymentCount || 0 }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">三方支付金额：</span>
+            <span class="value">¥{{ formatAmount(fullSummaryData.thirdPartyPaymentAmount) }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">公司交易次数：</span>
+            <span class="value">{{ fullSummaryData.companyCount || 0 }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">公司交易金额：</span>
+            <span class="value">¥{{ formatAmount(fullSummaryData.companyAmount) }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">消费次数：</span>
+            <span class="value">{{ fullSummaryData.consumptionCount || 0 }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">消费金额：</span>
+            <span class="value">¥{{ formatAmount(fullSummaryData.consumptionAmount) }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">空壳公司次数：</span>
+            <span class="value">{{ fullSummaryData.shellCompanyCount || 0 }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">空壳公司金额：</span>
+            <span class="value">¥{{ formatAmount(fullSummaryData.shellCompanyAmount) }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">转账次数：</span>
+            <span class="value">{{ fullSummaryData.transferCount || 0 }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">转账金额：</span>
+            <span class="value">¥{{ formatAmount(fullSummaryData.transferAmount) }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">消费率：</span>
+            <span class="value">{{ (fullSummaryData.consumptionRate || 0) }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">消费占比：</span>
+            <span class="value">{{ (fullSummaryData.consumptionRatio || 0) }}</span>
+          </div>
+        </div>
+
+        <div class="detail-section" v-if="fullSummaryData">
+          <h4>时间统计</h4>
+          <div class="detail-row">
+            <span class="label">首次交易时间：</span>
+            <span class="value">{{ formatTime(fullSummaryData.firstTransactionTime) }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">最后交易时间：</span>
+            <span class="value">{{ formatTime(fullSummaryData.lastTransactionTime) }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">峰值日期：</span>
+            <span class="value">{{ formatTime(fullSummaryData.peakDate) }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">峰值次数：</span>
+            <span class="value">{{ fullSummaryData.peakCount || 0 }}</span>
+          </div>
+        </div>
+
+        <div class="detail-section" v-if="loadingSummary">
+          <div class="loading-text">正在加载汇总数据...</div>
         </div>
         
         <div class="detail-section" v-if="nodeData.recentTransactions">
@@ -100,7 +192,7 @@
 
 <script>
 import moment from 'moment'
-import api from '../api'
+import { fundApi } from '../api'
 
 export default {
   name: 'NodeDetailModal',
@@ -128,25 +220,33 @@ export default {
   methods: {
     async fetchFullSummary(cardId) {
       if (!cardId) {
+        console.log('❌ fetchFullSummary: cardId为空');
         this.fullSummaryData = null;
         return;
       }
-      console.log('Fetching summary data for cardId:', cardId);
+      
+      console.log('🔄 开始获取汇总数据, cardId:', cardId);
       this.loadingSummary = true;
+      
       try {
-        const res = await api.get(`/summary/${cardId}`);
-        // axios返回结构为 { data: { success: true, data: {...} } }
-        if (res && res.data && res.data.success && res.data.data) {
-          this.fullSummaryData = res.data.data;
+        console.log('📡 发送API请求到:', `/api/summary/${cardId}`);
+        const res = await fundApi.getTransactionSummary(cardId);
+        console.log('📥 API响应原始数据:', res);
+        
+        if (res && res.success && res.data) {
+          console.log('✅ 汇总数据获取成功:', res.data);
+          this.fullSummaryData = res.data;
         } else {
+          console.warn('⚠️ 无效的响应数据:', res);
           this.fullSummaryData = null;
-          console.warn('No summary data found or invalid response:', res);
         }
       } catch (error) {
-        console.error("获取弹窗汇总信息失败:", error);
+        console.error("❌ 获取汇总数据失败:", error);
+        console.error("❌ 错误详情:", error.response || error.message);
         this.fullSummaryData = null;
       } finally {
         this.loadingSummary = false;
+        console.log('🏁 fetchFullSummary 完成, loadingSummary:', this.loadingSummary);
       }
     },
     formatAmount(amount) {
@@ -168,6 +268,17 @@ export default {
         '空壳公司': 'tag-shell'
       }
       return riskTags[tag] || 'tag-default'
+    },
+    
+    getCardNatureClass(nature) {
+      const natureClasses = {
+        '收款卡': 'tag-receiver',
+        '中转卡': 'tag-transfer',
+        '出款卡': 'tag-sender',
+        '正常': 'tag-normal',
+        '高风险': 'tag-high-risk'
+      }
+      return natureClasses[nature] || 'tag-default'
     },
     
     toggleExpansion() {
@@ -317,6 +428,18 @@ export default {
 .tag-default {
   background: #fafafa;
   color: #666;
+}
+
+.tag-sender {
+  background: #fff1f0;
+  color: #ff4d4f;
+}
+
+.loading-text {
+  text-align: center;
+  padding: 1rem;
+  color: #999;
+  font-style: italic;
 }
 
 .transaction-list {

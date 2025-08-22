@@ -4,6 +4,7 @@ import dotenv from 'dotenv'
 import { graphRouter } from './routes/graph.js'
 import { nodeRouter } from './routes/node.js'
 import { searchRouter } from './routes/search.js'
+import summaryRouter from './routes/summary.js'
 
 
 dotenv.config()
@@ -17,6 +18,7 @@ app.use(express.json())
 app.use('/api/graph', graphRouter)
 app.use('/api/node', nodeRouter)
 app.use('/api/search', searchRouter)
+app.use('/api/summary', summaryRouter)
 
 
 app.get('/api/health', (req, res) => {
