@@ -1,8 +1,20 @@
 
 import { query } from '../config/database.js'
 
+// 常量定义
+const SYMBOL_SIZE = {
+  MIN: 30,
+  MAX: 80,
+  SCALE_FACTOR: 20000
+}
 
-// 资金流向主模型，所有字段、聚合、标签、接口严格对齐需求文档
+const LINE_WIDTH = {
+  MIN: 1,
+  MAX: 10,
+  SCALE_FACTOR: 10000
+}
+
+// 资金流向主模型
 export class Transaction {
   /**
    * 查询指定卡号相关的所有交易明细，只需卡号参数，自动区分进出方向
@@ -32,10 +44,9 @@ export class Transaction {
   }
   
   /**
-   * 获取资金流向图谱数据，节点/边聚合、标签、颜色、所有字段严格对齐需求文档
+   * 获取资金流向图谱数据
    * @param {string} cardId
    * @param {number} depth
-   * @param {object} filter
    */
   static async getGraphDataByCardId(cardId, depth = 1) {
     // 1. 获取所有相关交易
@@ -95,7 +106,7 @@ export class Transaction {
         transactionTypes: Array.from(stats.transactionTypes),
         cardType: summary?.卡性质 || '普通卡',
         category: summary?.卡性质 || '普通卡',
-        symbolSize: Math.min(Math.max((stats.totalIn + stats.totalOut) / 20000, 30), 80),
+        symbolSize: Math.min(Math.max((stats.totalIn + stats.totalOut) / SYMBOL_SIZE.SCALE_FACTOR, SYMBOL_SIZE.MIN), SYMBOL_SIZE.MAX),
         label: {
           show: true,
           position: 'right',
@@ -139,7 +150,7 @@ export class Transaction {
         formatter: `次数: ${link.count} 金额: ¥${link.amount.toFixed(2)}`
       },
       lineStyle: {
-        width: Math.min(Math.max(link.amount / 10000, 1), 10),
+        width: Math.min(Math.max(link.amount / LINE_WIDTH.SCALE_FACTOR, LINE_WIDTH.MIN), LINE_WIDTH.MAX),
         color: link.direction === '进' ? '#52c41a' : '#ff4d4f',
         opacity: 0.8
       }
@@ -178,18 +189,107 @@ export class Transaction {
     const [result] = await query(sql, [cardId])
     return result
   }
+
+  /**
+   * 获取单个节点的基本信息（不包含关联交易）
+   */
+  static async getNodeOnlyByCardId(cardId) {
+    // 获取节点的基本交易统计
+    const transactions = await this.getByCardId(cardId)
+    if (transactions.length === 0) {
+      return null
+    }
+
+    // 统计节点的进出金额
+    let totalIn = 0
+    let totalOut = 0
+    let countIn = 0
+    let countOut = 0
+    const transactionTypes = new Set()
+
+    transactions.forEach(tx => {
+      if (tx.direction === '收') {
+        totalIn += parseFloat(tx.amount || 0)
+        countIn += 1
+      } else if (tx.direction === '付') {
+        totalOut += parseFloat(tx.amount || 0)
+        countOut += 1
+      }
+      transactionTypes.add(tx.transactionType || '转账')
+    })
+
+    // 获取汇总信息
+    let summary = null
+    try {
+      const summaryQuery = `SELECT 主端卡号, 卡性质 FROM 汇总表 WHERE 主端卡号 = ?`
+      const summaries = await query(summaryQuery, [cardId])
+      if (summaries.length > 0) {
+        summary = summaries[0]
+      }
+    } catch (e) {
+      console.warn('获取汇总数据失败:', e)
+    }
+
+    const cardName = transactions[0]?.cardName || '未知'
+    
+    return {
+      id: cardId,
+      name: cardName,
+      cardId: cardId,
+      totalIn,
+      totalOut,
+      countIn,
+      countOut,
+      transactionTypes: Array.from(transactionTypes),
+      cardType: summary?.卡性质 || '普通卡',
+      category: summary?.卡性质 || '普通卡',
+      symbolSize: Math.min(Math.max((totalIn + totalOut) / SYMBOL_SIZE.SCALE_FACTOR, SYMBOL_SIZE.MIN), SYMBOL_SIZE.MAX),
+      itemStyle: {
+        color: this.getNodeColor(summary)
+      }
+    }
+  }
   
   /**
    * 仅支持卡号模糊搜索
    */
   static async searchByKeyword(keyword) {
     const sql = `
-      SELECT DISTINCT 交易卡号 as cardId
+      SELECT DISTINCT 交易卡号 as cardId, 交易户名 as cardName
       FROM 交易明细表 
       WHERE 交易卡号 LIKE ?
       LIMIT 20
     `
     const searchPattern = `%${keyword}%`
     return await query(sql, [searchPattern])
+  }
+
+  /**
+   * 分页搜索卡号
+   */
+  static async searchByKeywordPaged(keyword, options = {}) {
+    const { offset = 0, limit = 20 } = options
+    const sql = `
+      SELECT DISTINCT 交易卡号 as cardId, 交易户名 as cardName
+      FROM 交易明细表 
+      WHERE 交易卡号 LIKE ?
+      LIMIT ? OFFSET ?
+    `
+    const searchPattern = `%${keyword}%`
+    return await query(sql, [searchPattern, limit, offset])
+  }
+
+  /**
+   * 获取搜索结果总数
+   */
+  static async getSearchResultCount(keyword) {
+    const sql = `
+      SELECT COUNT(DISTINCT 交易卡号) as total
+      FROM 交易明细表 
+      WHERE 交易卡号 LIKE ?
+    `
+    const searchPattern = `%${keyword}%`
+    const [result] = await query(sql, [searchPattern])
+    return result?.total || 0
   }
 }

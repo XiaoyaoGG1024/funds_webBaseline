@@ -4,25 +4,45 @@
       <div class="search-section">
         <input 
           v-model="searchKeyword"
+          @input="onSearchInput"
           @keyup.enter="searchNode"
-          placeholder="搜索卡号"
+          placeholder="搜索卡号（支持实时搜索）"
           class="search-input"
         />
         <button @click="searchNode" class="btn btn-primary">搜索</button>
+        <button @click="handleClearSearch" class="btn btn-default">清空</button>
       </div>
       <div class="filter-section">
         <label>交易方向：</label>
-        <select v-model="selectedDirection" class="type-select">
+        <select v-model="selectedDirection" @change="applyFilter" class="type-select">
           <option value="">全部</option>
           <option value="进">进</option>
           <option value="出">出</option>
         </select>
-        <button @click="applyFilter" class="btn btn-secondary">应用过滤</button>
-        <button @click="resetFilter" class="btn btn-default">重置</button>
+        <label>金额范围：</label>
+        <input 
+          v-model="minAmount" 
+          @input="applyFilter"
+          placeholder="最小金额"
+          type="number" 
+          class="amount-input"
+        />
+        <input 
+          v-model="maxAmount" 
+          @input="applyFilter"
+          placeholder="最大金额"
+          type="number" 
+          class="amount-input"
+        />
+        <button @click="handleResetFilter" class="btn btn-default">重置</button>
       </div>
       <div class="export-section">
         <button @click="exportPNG" class="btn btn-success">导出PNG</button>
         <button @click="exportCSV" class="btn btn-success">导出CSV</button>
+      </div>
+      <div class="stats-section">
+        <span class="stats-item">节点: {{ graphData.nodes.length }}</span>
+        <span class="stats-item">连接: {{ graphData.links.length }}</span>
       </div>
     </div>
     
@@ -43,11 +63,15 @@
 </template>
 
 <script>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick, onUnmounted, watch } from 'vue'
 import * as echarts from 'echarts'
 import { saveAs } from 'file-saver'
 import { fundApi } from '../api'
 import NodeDetailModal from '../components/NodeDetailModal.vue'
+import ChartEnhancer from '../utils/chartEnhancer.js'
+import { useSearch } from '../composables/useSearch.js'
+import { useGraphData } from '../composables/useGraphData.js'
+import { useFilter } from '../composables/useFilter.js'
 
 export default {
   name: 'FundGraph',
@@ -57,79 +81,169 @@ export default {
   setup() {
     const chartContainer = ref(null)
     const chart = ref(null)
-    const searchKeyword = ref('')
-    const selectedDirection = ref('')
+    const chartEnhancer = ref(null)
     const showNodeDetail = ref(false)
     const selectedNodeData = ref(null)
-    const loading = ref(false)
-    const graphData = ref({ nodes: [], links: [] })
-    const originalGraphData = ref({ nodes: [], links: [] })
-    const expandedNodes = ref(new Set())
+    
+    // 使用组合式函数
+    const {
+      searchKeyword,
+      searchSuggestions,
+      isSearching,
+      searchHistory,
+      searchedCardIds,
+      onSearchInput,
+      clearSearch
+    } = useSearch()
+    
+    const {
+      loading,
+      graphData,
+      originalGraphData,
+      expandedNodes,
+      updateGraphData,
+      searchNode: performSearch,
+      expandNode
+    } = useGraphData()
+    
+    const {
+      selectedDirection,
+      minAmount,
+      maxAmount,
+      applyFilter: performFilter,
+      resetFilter
+    } = useFilter()
 
+    // 图表初始化
     const initChart = () => {
       if (!chartContainer.value) return
 
       chart.value = echarts.init(chartContainer.value)
+      
+      chartEnhancer.value = new ChartEnhancer(chart.value, {
+        enableZoom: true,
+        enablePan: true,
+        minZoom: 0.3,
+        maxZoom: 3,
+        zoomSensitivity: 0.05
+      })
 
       const option = {
         title: {
           text: '资金流向图谱',
           top: 'top',
-          left: 'center'
+          left: 'center',
+          textStyle: {
+            fontSize: 18,
+            color: '#333'
+          }
         },
         tooltip: {
           trigger: 'item',
+          confine: true,
           formatter: (params) => {
             if (params.dataType === 'node') {
-              return `${params.data.name}<br/>卡号: ${params.data.cardId}<br/>金额: ¥${params.data.amount || 0}`
+              const node = params.data
+              return `
+                <div style="padding: 8px;">
+                  <strong>${node.name}</strong><br/>
+                  卡号: ${node.cardId}<br/>
+                  金额: ¥${(node.amount || 0).toLocaleString()}<br/>
+                  类型: ${node.category || '未知'}<br/>
+                  ${node.expanded ? '已展开' : '点击展开'}
+                </div>
+              `
             } else if (params.dataType === 'edge') {
-              return `交易次数: ${params.data.count || 0}<br/>交易总金额: ¥${params.data.amount || 0}`
+              const link = params.data
+              return `
+                <div style="padding: 8px;">
+                  交易次数: ${(link.count || 0).toLocaleString()}<br/>
+                  交易总金额: ¥${(link.amount || 0).toLocaleString()}<br/>
+                  方向: ${link.direction || '未知'}
+                </div>
+              `
             }
           }
         },
         series: [{
+          name: '资金流向图',
           type: 'graph',
           layout: 'force',
-          animation: false,
+          animation: true,
+          animationDurationUpdate: 300,
+          animationEasingUpdate: 'cubicOut',
           label: {
             show: true,
             position: 'right',
+            fontSize: 12,
             formatter: function (params) {
-              if (params.dataType === 'edge') {
-                return `次数:${params.data.count || 0} 金额:¥${params.data.amount || 0}`
-              }
-              return '{b}'
+              return params.data.name ? params.data.name.substring(0, 8) + (params.data.name.length > 8 ? '...' : '') : '{b}'
             }
           },
+          labelLayout: {
+            hideOverlap: true
+          },
           draggable: true,
-          data: graphData.value.nodes,
-          links: graphData.value.links,
+          roam: 'move', // 只允许平移，不允许缩放
+          data: [],
+          links: [],
           categories: [
-            { name: '起始节点', itemStyle: { color: '#1890ff' } },
+            { name: '搜索节点', itemStyle: { color: '#ff4d4f' } },
+            { name: '关联节点', itemStyle: { color: '#52c41a' } },
             { name: '收款方', itemStyle: { color: '#52c41a' } },
             { name: '付款方', itemStyle: { color: '#faad14' } },
             { name: '中转卡', itemStyle: { color: '#722ed1' } },
             { name: '风险卡', itemStyle: { color: '#ff4d4f' } }
           ],
           force: {
-            initLayout: 'circular',
-            repulsion: 1000,
-            gravity: 0.1,
-            edgeLength: 200,
-            layoutAnimation: true
+            repulsion: [200, 800],
+            gravity: 0.05,
+            edgeLength: [100, 200],
+            layoutAnimation: false,
+            friction: 0.8,
+            initLayout: 'circular'
           },
           lineStyle: {
             color: 'source',
-            curveness: 0.3
+            curveness: 0.2,
+            width: (params) => {
+              const amount = params.data.amount || 0
+              return Math.max(1, Math.min(8, amount / 10000))
+            },
+            opacity: 0.8
+          },
+          emphasis: {
+            focus: 'adjacency',
+            blurScope: 'coordinateSystem',
+            lineStyle: {
+              width: 8,
+              opacity: 1
+            },
+            itemStyle: {
+              borderWidth: 3,
+              borderColor: '#fff',
+              shadowBlur: 10,
+              shadowColor: 'rgba(0,0,0,0.3)'
+            }
           }
         }]
       }
 
       chart.value.setOption(option)
+      bindChartEvents()
+    }
 
+    // 图表事件绑定
+    const bindChartEvents = () => {
       chart.value.on('click', (params) => {
         if (params.dataType === 'node') {
           onNodeClick(params.data)
+        }
+      })
+      
+      chart.value.on('dblclick', (params) => {
+        if (params.dataType === 'node') {
+          toggleNodeExpansion(params.data)
         }
       })
     }
@@ -152,69 +266,77 @@ export default {
       }
     }
 
-    const updateGraphData = (data, isOriginal = false) => {
-      console.log('更新图之前数据:', graphData.value)
-      graphData.value = data
-      console.log('更新图数据:', graphData.value)
-      if (isOriginal) {
-        originalGraphData.value = JSON.parse(JSON.stringify(data))
-      }
-      if (chart.value) {
+    // 更新图表显示
+    const refreshChart = () => {
+      console.log('refreshChart 被调用，当前数据:', {
+        nodes: graphData.value.nodes?.length || 0,
+        links: graphData.value.links?.length || 0
+      })
+      
+      if (chart.value && graphData.value) {
         chart.value.setOption({
           series: [{
-            data: graphData.value.nodes,
-            links: graphData.value.links
+            name: '资金流向图',
+            type: 'graph',
+            layout: 'force',
+            data: graphData.value.nodes || [],
+            links: graphData.value.links || [],
+            categories: [
+              { name: '搜索节点', itemStyle: { color: '#ff4d4f' } },
+              { name: '关联节点', itemStyle: { color: '#52c41a' } },
+              { name: '收款方', itemStyle: { color: '#52c41a' } },
+              { name: '付款方', itemStyle: { color: '#faad14' } },
+              { name: '中转卡', itemStyle: { color: '#722ed1' } },
+              { name: '风险卡', itemStyle: { color: '#ff4d4f' } }
+            ],
+            force: {
+              repulsion: [200, 800],
+              gravity: 0.05,
+              edgeLength: [100, 200],
+              layoutAnimation: false,
+              friction: 0.8,
+              initLayout: 'circular'
+            }
           }]
-        })
+        }, true) // 强制重新渲染
+        
+        console.log('图表已更新')
+      } else {
+        console.warn('图表或数据为空:', { chart: !!chart.value, data: !!graphData.value })
       }
     }
 
- const searchNode = async () => {
-  if (!searchKeyword.value.trim()) return
-
-  try {
-    loading.value = true
-    const res = await fundApi.getGraphData(searchKeyword.value.trim())
-    console.log('响应结果:', res)
-    // res 就是后端返回的对象（已是data层）
-    if (res && Array.isArray(res.nodes)) {
-      console.log('搜索结果:', res)
-      updateGraphData(res, true)
+    // 搜索功能
+    const searchNode = async () => {
+      const result = await performSearch(searchKeyword, searchHistory, searchedCardIds, refreshChart)
+      if (result.success) {
+        if (result.partialSuccess) {
+          alert(result.message) // 显示部分成功的提示
+        }
+      } else {
+        alert(result.message)
+      }
+    }
+    
+    const handleClearSearch = () => {
+      clearSearch()
+      updateGraphData({ nodes: [], links: [] }, true)
       expandedNodes.value.clear()
-    } else {
-      alert('未找到相关交易数据或接口返回异常')
+      refreshChart()
     }
-  } catch (error) {
-    console.error('搜索失败:', error)
-    alert('搜索失败，请检查卡号是否正确')
-  } finally {
-    loading.value = false
-  }
- }
 
+    // 过滤功能
     const applyFilter = () => {
-      if (!originalGraphData.value.nodes.length) return
-      let filteredLinks = originalGraphData.value.links.filter(link => {
-        if (!selectedDirection.value) return true
-        return link.direction === selectedDirection.value
-      })
-      const nodeIds = new Set()
-      filteredLinks.forEach(link => {
-        nodeIds.add(link.source)
-        nodeIds.add(link.target)
-      })
-      let filteredNodes = originalGraphData.value.nodes.filter(node => nodeIds.has(node.id))
-      updateGraphData({
-        nodes: filteredNodes,
-        links: filteredLinks
-      })
+      performFilter(originalGraphData, updateGraphData)
+      refreshChart()
     }
 
-    const resetFilter = () => {
-      selectedDirection.value = ''
-      updateGraphData(JSON.parse(JSON.stringify(originalGraphData.value)))
+    const handleResetFilter = () => {
+      resetFilter(originalGraphData, updateGraphData)
+      refreshChart()
     }
 
+    // 节点展开/收缩
     const toggleNodeExpansion = async (nodeData) => {
       const nodeId = nodeData.cardId
 
@@ -223,29 +345,7 @@ export default {
         collapseNode(nodeId)
       } else {
         expandedNodes.value.add(nodeId)
-        await expandNode(nodeId)
-      }
-    }
-
-    const expandNode = async (cardId) => {
-      try {
-        loading.value = true
-        const newData = await fundApi.getGraphData(cardId)
-
-        const existingNodeIds = new Set(graphData.value.nodes.map(n => n.id))
-        const existingLinkIds = new Set(graphData.value.links.map(l => `${l.source}-${l.target}`))
-
-        const newNodes = newData.nodes.filter(n => !existingNodeIds.has(n.id))
-        const newLinks = newData.links.filter(l => !existingLinkIds.has(`${l.source}-${l.target}`))
-
-        graphData.value.nodes = [...graphData.value.nodes, ...newNodes]
-        graphData.value.links = [...graphData.value.links, ...newLinks]
-
-        updateGraphData(graphData.value)
-      } catch (error) {
-        console.error('展开节点失败:', error)
-      } finally {
-        loading.value = false
+        await expandNode(nodeId, searchedCardIds, refreshChart)
       }
     }
 
@@ -261,14 +361,15 @@ export default {
       })
 
       graphData.value.nodes = graphData.value.nodes.filter(
-        node => node.cardId === cardId || !connectedNodeIds.has(node.cardId)
+        node => node.isSearched || node.cardId === cardId || !connectedNodeIds.has(node.cardId)
       )
 
       graphData.value.links = graphData.value.links.filter(
         link => link.source !== cardId && link.target !== cardId
       )
-
-      updateGraphData(graphData.value)
+      
+      originalGraphData.value = JSON.parse(JSON.stringify(graphData.value))
+      refreshChart()
     }
 
     const exportPNG = () => {
@@ -301,33 +402,68 @@ export default {
         ])
       ].map(row => row.join(',')).join('\n')
 
+      const searchKey = searchKeyword.value || 'search'
       const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8' })
-      saveAs(blob, `资金流向数据_${cardId}.csv`)
+      saveAs(blob, `资金流向数据_${searchKey}.csv`)
     }
-
+    
+    // 监听过滤条件变化
+    watch([selectedDirection, minAmount, maxAmount], () => {
+      if (originalGraphData.value.nodes.length > 0) {
+        applyFilter()
+      }
+    })
+    
     onMounted(async () => {
       await nextTick()
       initChart()
-      updateGraphData({ nodes: [{ id: 'empty', name: '请先搜索卡号', cardId: '', category: '提示' }], links: [] }, true)
-      window.addEventListener('resize', () => {
+      updateGraphData({ 
+        nodes: [{ 
+          id: 'welcome', 
+          name: '请先搜索卡号', 
+          cardId: '', 
+          category: '提示',
+          symbolSize: 40,
+          itemStyle: { color: '#1890ff' }
+        }], 
+        links: [] 
+      }, true)
+      
+      const resizeHandler = () => {
         if (chart.value) {
           chart.value.resize()
         }
-      })
+      }
+      window.addEventListener('resize', resizeHandler)
+    })
+    
+    onUnmounted(() => {
+      if (chartEnhancer.value) {
+        chartEnhancer.value.destroy()
+      }
+      window.removeEventListener('resize', () => {})
     })
 
     return {
       chartContainer,
       searchKeyword,
       selectedDirection,
+      minAmount,
+      maxAmount,
       showNodeDetail,
       selectedNodeData,
       loading,
+      graphData,
+      searchSuggestions,
+      isSearching,
       searchNode,
+      onSearchInput,
+      handleClearSearch,
       applyFilter,
-      resetFilter,
+      handleResetFilter,
       exportPNG,
-      exportCSV
+      exportCSV,
+      searchedCardIds
     }
   }
 }
@@ -337,7 +473,8 @@ export default {
 .fund-graph {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 120px);
+  height: 100vh;
+  overflow: hidden;
 }
 
 .control-panel {
@@ -350,9 +487,12 @@ export default {
   gap: 2rem;
   align-items: center;
   flex-wrap: wrap;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1000;
 }
 
-.search-section, .filter-section, .export-section {
+.search-section, .filter-section, .export-section, .stats-section {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -366,7 +506,7 @@ export default {
 }
 
 .search-input {
-  width: 200px;
+  width: 250px;
 }
 
 .amount-input {
@@ -395,15 +535,6 @@ export default {
   background: #40a9ff;
 }
 
-.btn-secondary {
-  background: #faad14;
-  color: white;
-}
-
-.btn-secondary:hover {
-  background: #ffc53d;
-}
-
 .btn-success {
   background: #52c41a;
   color: white;
@@ -429,11 +560,18 @@ export default {
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
   position: relative;
   overflow: hidden;
+  min-height: 0;
 }
 
 .chart-container {
   width: 100%;
   height: 100%;
+  position: relative;
+  cursor: grab;
+}
+
+.chart-container:active {
+  cursor: grabbing;
 }
 
 .loading-overlay {
@@ -447,10 +585,52 @@ export default {
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  backdrop-filter: blur(2px);
 }
 
 .loading-spinner {
   font-size: 18px;
   color: #666;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.stats-section {
+  margin-left: auto;
+  font-size: 12px;
+  color: #666;
+}
+
+.stats-item {
+  background: #f0f0f0;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  margin-left: 0.5rem;
+}
+
+@media (max-width: 768px) {
+  .control-panel {
+    flex-direction: column;
+    gap: 1rem;
+  }
+  
+  .search-section, .filter-section, .export-section {
+    width: 100%;
+    justify-content: center;
+  }
+  
+  .search-input {
+    width: 100%;
+    max-width: 300px;
+  }
+  
+  .stats-section {
+    margin-left: 0;
+    justify-content: center;
+  }
 }
 </style>

@@ -4,6 +4,7 @@ import dotenv from 'dotenv'
 import { graphRouter } from './routes/graph.js'
 import { nodeRouter } from './routes/node.js'
 import { searchRouter } from './routes/search.js'
+import { transactionRouter } from './routes/transaction.js'
 import summaryRouter from './routes/summary.js'
 
 
@@ -18,6 +19,7 @@ app.use(express.json())
 app.use('/api/graph', graphRouter)
 app.use('/api/node', nodeRouter)
 app.use('/api/search', searchRouter)
+app.use('/api/transactions', transactionRouter)
 app.use('/api/summary', summaryRouter)
 
 
