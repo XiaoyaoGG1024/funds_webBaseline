@@ -9,7 +9,7 @@
           placeholder="搜索卡号（支持实时搜索）"
           class="search-input"
         />
-        <button @click="searchNode" class="btn btn-primary">搜索</button>
+        <button @click="searchNode" class="btn btn-primary">搜索节点</button>
         <button @click="handleClearSearch" class="btn btn-default">清空</button>
       </div>
       <div class="filter-section">
@@ -103,7 +103,15 @@ export default {
       expandedNodes,
       updateGraphData,
       searchNode: performSearch,
-      expandNode
+      expandNode,
+      multiLevelMode,
+      searchMultiLevelAssociations,
+      toggleSearchMode,
+      associationRules,
+      updateAssociationRules,
+      getLevelStats,
+      currentLevel,
+      maxLevels
     } = useGraphData()
     
     const {
@@ -121,7 +129,7 @@ export default {
       chart.value = echarts.init(chartContainer.value)
       
       chartEnhancer.value = new ChartEnhancer(chart.value, {
-        enableZoom: true,
+        enableZoom: false,
         enablePan: true,
         minZoom: 0.3,
         maxZoom: 3,
@@ -166,6 +174,7 @@ export default {
           }
         },
         series: [{
+          id: 'fund-graph-series', // 固定 ID
           name: '资金流向图',
           type: 'graph',
           layout: 'force',
@@ -175,16 +184,22 @@ export default {
           label: {
             show: true,
             position: 'right',
-            fontSize: 12,
+            fontSize: 11,
             formatter: function (params) {
-              return params.data.name ? params.data.name.substring(0, 8) + (params.data.name.length > 8 ? '...' : '') : '{b}'
+              const node = params.data
+              if (node.cardId && node.name) {
+                return `${node.name}\n${node.cardId}`
+              } else if (node.name) {
+                return node.name.length > 8 ? node.name.substring(0, 8) + '...' : node.name
+              }
+              return '{b}'
             }
           },
           labelLayout: {
             hideOverlap: true
           },
           draggable: true,
-          roam: 'move', // 只允许平移，不允许缩放
+          roam: { scale: false, move: true }, // 禁用缩放，保留平移
           data: [],
           links: [],
           categories: [
@@ -198,10 +213,27 @@ export default {
           force: {
             repulsion: [200, 800],
             gravity: 0.05,
-            edgeLength: [100, 200],
-            layoutAnimation: false,
+            edgeLength: [120, 250],
+            layoutAnimation: true,
             friction: 0.8,
             initLayout: 'circular'
+          },
+          edgeLabel: {
+            show: true,
+            fontSize: 9,
+            color: '#555',
+            position: 'middle',
+            formatter: function(params) {
+              const link = params.data
+              if (link.amount && link.amount > 0) {
+                return `¥${(link.amount / 10000).toFixed(1)}万`
+              }
+              return `${link.count || 1}笔`
+            }
+          },
+          edgeLabelLayout: {
+            hideOverlap: true,
+            moveOverlap: 'shiftX'
           },
           lineStyle: {
             color: 'source',
@@ -246,6 +278,13 @@ export default {
           toggleNodeExpansion(params.data)
         }
       })
+
+      // 移除有问题的事件监听
+    }
+
+    // 移除有问题的动态更新函数
+    const updateEdgeLabelsPosition = () => {
+      // 暂时移除，避免配置错误
     }
 
     const onNodeClick = async (nodeData) => {
@@ -266,7 +305,7 @@ export default {
       }
     }
 
-    // 更新图表显示
+    // 更新图表显示 - 优化版本，避免状态丢失
     const refreshChart = () => {
       console.log('refreshChart 被调用，当前数据:', {
         nodes: graphData.value.nodes?.length || 0,
@@ -274,39 +313,71 @@ export default {
       })
       
       if (chart.value && graphData.value) {
+        // 保存现有节点位置
+        const currentOption = chart.value.getOption()
+        if (currentOption?.series?.[0]?.data) {
+          currentOption.series[0].data.forEach(node => {
+            if (node.x && node.y && (node.id || node.cardId)) {
+              nodePositionCache.value.set(node.id || node.cardId, { x: node.x, y: node.y })
+            }
+          })
+        }
+        
+        // 为新节点恢复缓存位置
+        const nodesWithPosition = (graphData.value.nodes || []).map(node => {
+          const cachedPos = nodePositionCache.value.get(node.id || node.cardId)
+          if (cachedPos && !node.x && !node.y) {
+            return { ...node, x: cachedPos.x, y: cachedPos.y }
+          }
+          return node
+        })
+        
+        // 只更新数据和类别，不重新初始化力导向布局
         chart.value.setOption({
           series: [{
-            name: '资金流向图',
-            type: 'graph',
-            layout: 'force',
-            data: graphData.value.nodes || [],
+            id: 'fund-graph-series', // 固定 ID 避免重建
+            data: nodesWithPosition,
             links: graphData.value.links || [],
             categories: [
               { name: '搜索节点', itemStyle: { color: '#ff4d4f' } },
-              { name: '关联节点', itemStyle: { color: '#52c41a' } },
-              { name: '收款方', itemStyle: { color: '#52c41a' } },
-              { name: '付款方', itemStyle: { color: '#faad14' } },
+              { name: '转入节点', itemStyle: { color: '#52c41a' } },
+              { name: '转出节点', itemStyle: { color: '#faad14' } },
+              { name: '关联节点', itemStyle: { color: '#1890ff' } },
               { name: '中转卡', itemStyle: { color: '#722ed1' } },
               { name: '风险卡', itemStyle: { color: '#ff4d4f' } }
             ],
-            force: {
-              repulsion: [200, 800],
-              gravity: 0.05,
-              edgeLength: [100, 200],
-              layoutAnimation: false,
-              friction: 0.8,
-              initLayout: 'circular'
+            edgeLabel: {
+              show: true,
+              fontSize: 9,
+              color: '#555',
+              position: 'middle',
+              formatter: function(params) {
+                const link = params.data
+                if (link.amount && link.amount > 0) {
+                  return `¥${(link.amount / 10000).toFixed(1)}万`
+                }
+                return `${link.count || 1}笔`
+              }
+            },
+            edgeLabelLayout: {
+              hideOverlap: true,
+              moveOverlap: 'shiftX'
             }
+            // 不重复设置 layout 和 force 配置，保持现有状态
           }]
-        }, true) // 强制重新渲染
+        }, {
+          // 使用增量更新模式，保持动画连续性
+          replaceMerge: ['series'],
+          notMerge: false
+        })
         
-        console.log('图表已更新')
+        console.log('图表已增量更新，节点位置已缓存')
       } else {
         console.warn('图表或数据为空:', { chart: !!chart.value, data: !!graphData.value })
       }
     }
 
-    // 搜索功能
+    // 搜索功能 - 只显示搜索节点本身
     const searchNode = async () => {
       const result = await performSearch(searchKeyword, searchHistory, searchedCardIds, refreshChart)
       if (result.success) {
@@ -322,30 +393,57 @@ export default {
       clearSearch()
       updateGraphData({ nodes: [], links: [] }, true)
       expandedNodes.value.clear()
-      refreshChart()
+      debouncedRefreshChart()
     }
 
     // 过滤功能
     const applyFilter = () => {
       performFilter(originalGraphData, updateGraphData)
-      refreshChart()
+      debouncedRefreshChart()
     }
 
     const handleResetFilter = () => {
       resetFilter(originalGraphData, updateGraphData)
-      refreshChart()
+      debouncedRefreshChart()
     }
 
-    // 节点展开/收缩
+    // 节点展开/收缩 - 展开时进行关联分析
     const toggleNodeExpansion = async (nodeData) => {
       const nodeId = nodeData.cardId
 
       if (expandedNodes.value.has(nodeId)) {
+        // 收缩节点
         expandedNodes.value.delete(nodeId)
         collapseNode(nodeId)
       } else {
+        // 展开节点并进行关联分析
         expandedNodes.value.add(nodeId)
-        await expandNode(nodeId, searchedCardIds, refreshChart)
+        try {
+          console.log(`展开节点 ${nodeId}，正在分析关联...`)
+          
+          // 创建一个临时的关键字引用来调用多层级关联
+          const tempKeyword = ref(nodeId)
+          const tempHistory = ref([])
+          
+          const result = await searchMultiLevelAssociations(
+            tempKeyword,
+            tempHistory, 
+            searchedCardIds,
+            refreshChart,
+            2 // 展开时只分析2层，避免图谱过于复杂
+          )
+          
+          if (result.success) {
+            console.log(`节点 ${nodeId} 关联分析完成:`, {
+              新增节点: result.nodes?.length || 0,
+              层级统计: result.levelStats
+            })
+          }
+        } catch (error) {
+          console.error(`展开节点 ${nodeId} 失败:`, error)
+          // 即使关联分析失败，也保留原有的单层展开逻辑作为降级
+          await expandNode(nodeId, searchedCardIds, refreshChart)
+        }
       }
     }
 
@@ -369,7 +467,7 @@ export default {
       )
       
       originalGraphData.value = JSON.parse(JSON.stringify(graphData.value))
-      refreshChart()
+      debouncedRefreshChart()
     }
 
     const exportPNG = () => {
@@ -391,9 +489,9 @@ export default {
       if (!graphData.value.nodes.length) return
 
       const csvContent = [
-        ['节点ID', '节点名称', '卡号', '类型'],
+        ['节点ID', '节点名称', '卡号', '类型', '层级'],
         ...graphData.value.nodes.map(node => [
-          node.id, node.name, node.cardId, node.category
+          node.id, node.name, node.cardId, node.category, node.level || 1
         ]),
         [],
         ['源节点', '目标节点', '交易金额', '交易类型'],
@@ -404,7 +502,7 @@ export default {
 
       const searchKey = searchKeyword.value || 'search'
       const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8' })
-      saveAs(blob, `资金流向数据_${searchKey}.csv`)
+      saveAs(blob, `关联分析_${searchKey}.csv`)
     }
     
     // 监听过滤条件变化
@@ -413,6 +511,24 @@ export default {
         applyFilter()
       }
     })
+    
+    // resize监听器引用，供清理使用
+    const resizeHandler = ref(null)
+    
+    // 节点位置缓存，优化增量更新
+    const nodePositionCache = ref(new Map())
+    
+    // 防抖刷新函数
+    const debounce = (func, delay) => {
+      let timeoutId
+      return (...args) => {
+        clearTimeout(timeoutId)
+        timeoutId = setTimeout(() => func.apply(this, args), delay)
+      }
+    }
+    
+    const debouncedRefreshChart = debounce(() => refreshChart(), 100)
+    const debouncedUpdateLabels = debounce(() => updateEdgeLabelsPosition(), 50)
     
     onMounted(async () => {
       await nextTick()
@@ -429,19 +545,24 @@ export default {
         links: [] 
       }, true)
       
-      const resizeHandler = () => {
+      resizeHandler.value = () => {
         if (chart.value) {
           chart.value.resize()
         }
       }
-      window.addEventListener('resize', resizeHandler)
+      window.addEventListener('resize', resizeHandler.value)
     })
     
     onUnmounted(() => {
       if (chartEnhancer.value) {
         chartEnhancer.value.destroy()
       }
-      window.removeEventListener('resize', () => {})
+      if (resizeHandler.value) {
+        window.removeEventListener('resize', resizeHandler.value)
+      }
+      if (chart.value) {
+        chart.value.dispose() // 释放 ECharts 实例
+      }
     })
 
     return {
@@ -633,4 +754,5 @@ export default {
     justify-content: center;
   }
 }
+
 </style>
