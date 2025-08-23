@@ -32,42 +32,7 @@ class ChartEnhancer {
   setupZoomFeatures() {
     if (!this.options.enableZoom) return
 
-    // 启用数据缩放
-    const option = this.chart.getOption()
-    
-    const enhancedOption = {
-      ...option,
-      dataZoom: [
-        {
-          type: 'inside',
-          disabled: false,
-          zoomLock: false,
-          throttle: 100
-        },
-        {
-          type: 'slider',
-          show: true,
-          xAxisIndex: 0,
-          start: 0,
-          end: 100,
-          height: 20,
-          bottom: 10
-        }
-      ],
-      toolbox: {
-        feature: {
-          dataZoom: {
-            yAxisIndex: false
-          },
-          restore: {},
-          saveAsImage: {
-            pixelRatio: 2
-          }
-        }
-      }
-    }
-
-    this.chart.setOption(enhancedOption, true)
+    // 对于图形布局，不使用dataZoom，而是使用原生缩放
     this.bindZoomEvents()
   }
 
@@ -79,17 +44,17 @@ class ChartEnhancer {
     chartDom.addEventListener('mousedown', this.onMouseDown.bind(this))
     chartDom.addEventListener('mousemove', this.onMouseMove.bind(this))
     chartDom.addEventListener('mouseup', this.onMouseUp.bind(this))
-    chartDom.addEventListener('wheel', this.onWheel.bind(this))
+    // 移除wheel事件监听，让ECharts原生处理
     
     // 防止上下文菜单
     chartDom.addEventListener('contextmenu', e => e.preventDefault())
   }
 
   setupToolbox() {
-    const currentOption = this.chart.getOption()
+    const currentOption = this.chart.getOption() || {}
     
     const toolboxFeatures = {
-      ...currentOption.toolbox?.[0]?.feature || {},
+      ...(currentOption.toolbox && currentOption.toolbox[0] && currentOption.toolbox[0].feature || {}),
       myZoomIn: {
         show: true,
         title: '放大',
@@ -161,45 +126,18 @@ class ChartEnhancer {
   }
 
   onWheel(e) {
-    if (!this.options.enableZoom) return
-
-    e.preventDefault()
-    
-    const delta = e.deltaY > 0 ? -this.options.zoomSensitivity : this.options.zoomSensitivity
-    const newZoom = Math.max(this.options.minZoom, 
-                           Math.min(this.options.maxZoom, this.zoomLevel + delta))
-    
-    if (newZoom !== this.zoomLevel) {
-      this.zoomLevel = newZoom
-      this.applyTransform()
-    }
+    // 让ECharts原生处理缩放，不拦截wheel事件
+    // ECharts图形组件自带缩放功能，无需自定义处理
   }
 
   applyTransform() {
-    const option = this.chart.getOption()
-    
-    // 应用缩放和平移变换
-    const series = option.series[0]
-    if (series && series.type === 'graph') {
-      // 对于图形，我们需要更新节点位置
-      this.updateNodePositions(series.data)
-    }
+    // 对于图形布局，使用ECharts原生的缩放和平移功能
+    // 不需要手动变换节点位置
   }
 
   updateNodePositions(nodes) {
-    nodes.forEach(node => {
-      if (node.x !== undefined && node.y !== undefined) {
-        // 应用缩放和平移
-        node.x = (node.x * this.zoomLevel) + this.panOffset.x
-        node.y = (node.y * this.zoomLevel) + this.panOffset.y
-      }
-    })
-
-    this.chart.setOption({
-      series: [{
-        data: nodes
-      }]
-    })
+    // 对于图形布局，节点位置由ECharts的力导向算法控制
+    // 不需要手动更新位置
   }
 
   zoomIn() {
