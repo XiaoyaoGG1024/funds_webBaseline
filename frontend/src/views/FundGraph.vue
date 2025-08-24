@@ -376,7 +376,6 @@ export default {
         console.warn('图表或数据为空:', { chart: !!chart.value, data: !!graphData.value })
       }
     }
-
     // 搜索功能 - 只显示搜索节点本身
     const searchNode = async () => {
       const result = await performSearch(searchKeyword, searchHistory, searchedCardIds, refreshChart)

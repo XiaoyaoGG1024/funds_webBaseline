@@ -51,8 +51,6 @@ class ChartEnhancer {
   }
 
   setupToolbox() {
-    // 删除右侧工具栏 - 不创建工具栏
-    return
   }
 
   bindZoomEvents() {
